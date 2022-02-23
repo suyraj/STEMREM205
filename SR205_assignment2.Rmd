@@ -1,0 +1,459 @@
+---
+title: "SR205_assignment2"
+output: html_notebook
+---
+
+
+
+```{r}
+library(edgeR)
+library(limma)
+library(ggplot2)
+library(tidyverse)
+library(pheatmap)
+library(RColorBrewer)
+library(EnhancedVolcano)
+library(ComplexHeatmap)
+library(viridis)
+library(circlize)
+
+```
+
+
+```{r}
+# import both sample info and import the counts file
+
+sample_info <- read.delim("GSE60450_SampleInfo.txt", stringsAsFactors = T)
+
+input_mat <- read.csv("GSE60450_CountsGeneSymbol.csv")
+ 
+```
+ 
+```{r}
+
+sample_info
+
+```
+
+```{r}
+input_mat
+```
+
+
+```{r}
+
+# save the length of the genes and remove that column from the counts matrix
+gene_len <- input_mat$Length
+
+
+cell_mat <- select(input_mat, -c(GeneSymbol,Length))
+row.names(cell_mat) <- input_mat[,1]
+
+```
+
+
+```{r}
+# shorten the column names and only keep things before the underscore
+colnames(cell_mat) <- str_remove(colnames(cell_mat), "_.*")
+
+```
+
+```{r}
+cell_mat
+```
+
+```{r}
+# make a DGE object to store counts
+egr <- DGEList(cell_mat)
+
+# make the groups for all the samples
+group <- paste(sample_info$CellType, sample_info$Status, sep = '_') %>% factor()
+
+
+# add them into the DGElist now
+egr$samples$group <- group
+```
+
+```{r}
+egr$samples
+```
+
+```{r}
+# calculate cpm
+egr_cpm <- cpm(egr)
+
+```
+
+```{r}
+# remove rows with lowly expressed genes
+# specifically keeping only genes that have cpm > 0.5 in at least 2 of the samples
+
+# makes a table with bools where its greater than 0.5
+bool_filter <- egr_cpm > 0.5
+
+# now filter based on the rows where there's expresssion in at least 2
+egr_cpm <- egr_cpm[rowSums(bool_filter) >= 2, keep.lib.sizes = T]
+
+
+```
+
+
+```{r}
+# get log 2 counts
+cpm_log <- cpm(egr, log = T)
+```
+
+
+```{r}
+
+png("Assignment2_question11_ReadCounts_per_Sample.png")
+# visualize the distribution of read counts per sample in log2 space
+boxplot(cpm_log, xlab = "samples", ylab = "Read Counts per Sample (Log2)")
+dev.off()
+
+```
+```{r}
+# make new DGElist with objects named based on sample
+group <- factor(paste(sample_info$CellType,sample_info$Status,sep="."))
+
+egr <- DGEList(cell_mat, group = group)
+
+
+```
+
+
+```{r}
+
+points <- c(0,1,2,15,16,17)
+colors <- rep(c("blue", "darkgreen", "red"), 2)
+
+png("Assignment2_question13_PCAplot.png")
+# PCA plot
+plotMDS(egr, col = colors[group], pch =points[group])
+# Let's add a legend to the plot so we know which colours correspond to which cell type
+legend("topleft",legend=levels(group), pch = points, col = colors, ncol = 2)
+dev.off()
+
+
+
+plotMDS(egr, col = colors[group], pch =points[group])
+# Let's add a legend to the plot so we know which colours correspond to which cell type
+legend("topleft",legend=levels(group), pch = points, col = colors, ncol = 2)
+
+```
+
+
+
+```{r}
+
+
+png("Assignment2_question15_scatterplot.png")
+
+
+# plot log2 matrix 
+plot(log2(egr$counts[,"MCL1.LC"]), log2(egr$counts[,"MCL1.LD"]), xlab = "Log2 MCL1.LC counts", ylab = "Log2 MCL1.LD counts")
+
+dev.off()
+
+
+# plot log2 matrix 
+plot(log2(egr$counts[,"MCL1.LC"]), log2(egr$counts[,"MCL1.LD"]), xlab = "Log2 MCL1.LC counts", ylab = "Log2 MCL1.LD counts")
+
+```
+
+
+```{r}
+
+# Pearson's Correlation
+cor.test(egr$counts[,"MCL1.LC"], egr$counts[,"MCL1.LD"])
+```
+
+```{r}
+# color the scatterplot
+
+png("Assignment2_question18BONUS_scatterplot.png")
+
+plot(log2(egr$counts[,"MCL1.LC"]), log2(egr$counts[,"MCL1.LD"]), 
+     xlab = "Log2 MCL1.LC counts", ylab = "Log2 MCL1.LD counts",
+     col = c("red", "blue"))
+legend("topleft",fill = c("red", "blue"),legend = c("MCL1.LC", "MCL1.LD"))
+
+
+dev.off()
+
+# plot log2 matrix 
+plot(log2(egr$counts[,"MCL1.LC"]), log2(egr$counts[,"MCL1.LD"]), 
+     xlab = "Log2 MCL1.LC counts", ylab = "Log2 MCL1.LD counts",
+     col = c("red", "blue"))
+legend("topleft",fill = c("red", "blue"),legend = c("MCL1.LC", "MCL1.LD"))
+
+```
+
+```{r}
+
+# calculate pairwise distance
+D = dist(t(egr_cpm), method = "euclidean")
+
+```
+
+
+```{r}
+png("Assignment2_question19BONUS_heatmap.png")
+pheatmap(as.matrix(D), main = "Similarity Between Samples by Euclidean Distance")
+dev.off()
+
+pheatmap(as.matrix(D), main = "Similarity Between Samples by Euclidean Distance")
+
+```
+
+
+```{r}
+# loading this
+library(DESeq2)
+
+```
+
+
+```{r}
+# move the edgeR counts into Deseq
+
+
+# create the design formula
+design <- as.formula(~ CellType)
+dds <- DESeqDataSetFromMatrix(countData = egr$counts,
+                              colData = sample_info,
+                              design = design)
+
+```
+
+```{r}
+
+dds <- DESeq(dds)
+
+res <- results(dds)
+
+res
+```
+
+```{r}
+
+res.table <- tibble(GeneSymbol = rownames(res), 
+                    log2FoldChange = res[,"log2FoldChange"],
+                    pvalue = res[,"pvalue"])
+
+res.table
+
+```
+
+```{r}
+# remove NA rows
+res.table <- na.omit(res.table)
+
+res.table
+```
+
+
+```{r, fig.height=8, fig.width=}
+
+
+
+EnhancedVolcano(
+  res.table,
+  lab = res.table$GeneSymbol,
+  x = "log2FoldChange",
+  y = "pvalue",
+  
+  xlim = c(-10,10),
+  
+  pCutoff = 1e-40, # pvalue cutoff
+  FCcutoff = 1, #log2 fc cutoff
+  
+  title = "Luminal vs Basal Volcanoplot",
+  subtitle = "Question 20",
+  
+  #connectors
+  drawConnectors = TRUE,
+  widthConnectors = 0.75
+  
+  
+)
+
+ggsave("Assignment2_question20_volcanoplot.png")
+
+```
+
+
+## Question 21
+```{r}
+
+
+# first filter results table for top 20 genes by log2FC
+top_genes <- res[order(res$log2FoldChange, decreasing = T), ] %>% as.data.frame()
+
+# next filter and remove genes with pvalue less than 0.01
+top_genes <- filter(top_genes, top_genes$padj < 0.01)
+
+# now only keep top 20 first of the basal and then of the luminal
+top_genes <- c(rownames(tail(top_genes,20)) ,rownames(top_genes)[1:20])
+
+top_genes
+
+```
+```{r}
+# I havent normalized the samples yet and its causing some outlier issues with the heatmap. adding this here to fix
+
+egr <- calcNormFactors(egr)
+
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+# how we can filter our edgeR matrix to only keep the top 20 genes
+mat <- egr$counts[top_genes,]
+colnames(mat) <- group
+
+head(mat)
+```
+
+```{r}
+# Generate cols to use for next part
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+```
+
+
+
+```{r}
+#set annotation for heatmap
+ann <- data.frame(sample_info$CellType, sample_info$Status)
+colnames(ann) <- c("CellType", "Status")
+
+ct.n <- length(levels(as.factor(sample_info$CellType)))
+ct.col <- sample(col_vector, ct.n)
+names(ct.col) = levels(as.factor(sample_info$CellType))
+
+status.n <- length(levels(as.factor(sample_info$Status)))
+status.col <- sample(col_vector, status.n)
+names(status.col) = levels(as.factor(sample_info$Status))
+
+ann.cols <- list(
+  "CellType" = ct.col,
+  'Status' = status.col
+)
+
+# Plug this into Complex heatmap in the next step
+colAnn <- HeatmapAnnotation(df = ann,
+                            which = 'column',
+                            col = ann.cols,
+                            annotation_width = unit(c(1, 4), 'cm'),
+                            gap = unit(1, 'mm'),
+                            show_legend = T)
+
+
+```
+
+```{r, fig.height=10, fig.width=8}
+
+# scale for heatmap
+col_fun <- colorRamp2(seq(0,200, length.out = 100), viridis(100))
+
+hm <- Heatmap(mat,
+        #name
+        name = " ",
+        # heatmap color
+        col = col_fun, 
+        
+        # Column Parameters
+        column_names_side = 'top',
+        show_column_dend = F,
+        column_names_rot = 30,
+        cluster_columns = F,
+        column_names_gp = gpar(fontsize = 8),
+        column_title = "",
+        
+        
+        
+        # Row Parameters
+        row_title = "Regulons",
+        show_row_dend = T,
+        cluster_rows = F,
+        show_row_names = T,
+        row_dend_side = 'right',
+        row_dend_width = unit(10,'mm'),
+        row_names_gp = gpar(fontsize = 8),
+        row_names_side = 'left',
+        
+        # Annotations
+        top_annotation=colAnn,
+        
+        # Legend
+        show_heatmap_legend = T
+)
+
+png("Assignment2_question21_heatmap.png")
+hm
+dev.off()
+
+
+hm
+```
+
+
+
+# Bonus question 22
+```{r}
+
+# create the design formula this time compensating for each condition
+
+design <- as.formula(~ CellType + Status + CellType:Status)
+
+dds <- DESeqDataSetFromMatrix(countData = egr$counts,
+                              colData = sample_info,
+                              design = design)
+
+```
+
+```{r}
+
+dds <- DESeq(dds)
+
+res <- results(dds)
+
+res
+```
+
+
+```{r}
+# now get top 5 genes
+
+rownames(res[order(res$padj), ])[1:5]
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
