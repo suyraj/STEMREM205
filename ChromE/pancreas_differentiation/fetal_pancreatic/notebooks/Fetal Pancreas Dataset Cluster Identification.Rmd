@@ -1,0 +1,241 @@
+---
+title: "Fetal Pancreas Dataset Cluster Identification"
+author: "Suyash Raj"
+output: html_notebook
+---
+
+```{r setup}
+
+knitr::opts_knit$set(root.dir = "~/VCGT001/fetal_pancreatic/cluster_id")
+knitr::opts_chunk$set(echo=T, warning=T, message=T)
+
+
+```
+
+
+# Setup
+
+### Load Libraries
+```{r Libraries, include=FALSE}
+
+library(Seurat) #v4 beta
+library(SeuratDisk)
+library(reticulate)
+library(glmGamPoi)
+library(tidyverse)
+library(stringr)
+library(viridis)
+library(MAST)
+library(RColorBrewer)
+library(patchwork)
+library(xlsx)
+library(scales)
+library(plotly)
+library(RcppAnnoy)
+library(future)
+library(future.apply)
+library(org.Hs.eg.db)
+
+use_condaenv("r-reticulate")
+use_python("r-reticulate")
+
+# Set this based on available ram
+plan("sequential")
+options(future.globals.maxSize = 60000 * 1024^2)
+
+```
+
+### Variables
+Here I add variables that I can frequently use throughout the analysis
+
+```{r startupvars}
+
+date <- Sys.Date()
+
+project_name <- paste0(date, 'VCGT_fetal_islet_ID')
+
+# Source functions from the functions file
+source('~/VCGT001/scripts/SR_functions.R')
+
+
+```
+
+
+```{r load dataset}
+
+sc <- readRDS("~/VCGT001/fetal_pancreatic/fetal_islet.seurat.RDS")
+
+```
+
+
+```{r CC_identify, fig.height=10, fig.width=15}
+
+# The table cc.genes.updated.2019 comes with Seurat!
+s.genes <- cc.genes.updated.2019$s.genes
+g2m.genes <- cc.genes.updated.2019$g2m.genes
+
+# Normalize and scale the data before we can score cell cycle
+sc <- SCTransform(sc, vars.to.regress = "percent.mito", method = "glmGamPoi")
+# First apply Cell Cycle Scores for both conditions
+sc <- CellCycleScoring(sc, s.features = s.genes, g2m.features = g2m.genes, set.ident = T)
+
+# Create CC Difference
+
+sc$CC.Diff <- sc$S.Score - sc$G2M.Score
+
+
+```
+
+```{r Regress Cell Cycle}
+
+sc <- SCTransform(sc, method = "glmGamPoi", vars.to.regress = c("percent.mito", "CC.Diff"))
+
+```
+
+
+```{r math stuff}
+sc <- RunPCA(sc, verbose = T) %>% 
+    FindNeighbors(dims = 1:30, # Dimensions
+                  annoy.metric = "manhattan",
+                  k.param = 15)  %>%
+    RunUMAP(dims = 1:30,
+            n.neighbors = 15,
+            metric = "manhattan",
+            min.dist = 0.3, # This allows for tighter clustering
+            n.epochs = 1000, # This repeats the algorithm 1000x to get most consistent result
+            local.connectivity = 3, # minimum 3 neighbors
+            verbose = T)
+```
+
+
+```{r clustering}
+
+sc <- FindClusters(sc,
+                   resolution = 0.6,
+                   algorithm = 3,
+                   verbose = T)
+
+```
+
+```{r}
+
+SR_dimplot(sc, T)
+
+```
+
+```{r save_incase}
+
+saveRDS(sc, file = "fetal_islets_analyzed.RDS")
+
+```
+
+
+```{r Classify Right Cells, fig.width= 30, fig.height= 18}
+
+p1 <- SR_dimplot(sc, T)
+
+p2 <- FeaturePlot(sc,
+                  features = c("NKX6-1", "ISL1", "INS", "NEUROG3",
+                               "CHGA", "VIM",
+                               "GCG", "ARX", 
+                               "LMX1A", "FEV",
+                               "SPOCK1",
+                               "SOX9",
+                               "KRT19",
+                               "MUC15",
+                               "HHEX",
+                               "SST",
+                               "TFF3", "CPA1","PRSS1","PTF1A",
+                               "ONECUT2"),
+                  cols = c("seashell2", "purple4"),
+                  ncol = 5,
+                  min.cutoff = 0,
+                  max.cutoff = "q98",
+                  order = T,
+                  pt.size = 1)
+
+p1 + p2 + plot_layout(widths = c(2,4))
+```
+
+
+
+```{r, fig.width=10}
+
+
+genelist <- c("NKX6-1", "ISL1", "INS", "NEUROG3",
+              "CHGA", "VIM",
+              "GCG", "ARX", 
+              "LMX1A", "FEV",
+              "SPOCK1",
+              "SOX9",
+              "KRT19",
+              "MUC15",
+              "HHEX",
+              "SST",
+              "TFF3", "CPA1","PRSS1", "PTF1A",
+              "ONECUT2")
+
+DotPlot(sc,
+        features = rev(genelist),
+        cols = c("seashell1", "mediumpurple3"),
+        col.min = -2.5,
+        col.max = 2.5,
+        scale.by = "radius") + RotatedAxis() + coord_flip()
+
+```
+
+
+```{r save}
+
+saveRDS(sc, file = "integrate_all.RDS")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

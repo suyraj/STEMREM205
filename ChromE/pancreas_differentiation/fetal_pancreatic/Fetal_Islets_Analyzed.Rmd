@@ -1,0 +1,301 @@
+---
+title: "Fetal_Islets_Analyzed"
+output: html_notebook
+---
+
+
+```{r}
+# Load Dependencies
+
+library(Seurat) #v3.1.1
+library(sctransform)
+library(reticulate)
+library(rmarkdown)
+library(stringr)
+library(tidyverse)
+library(leiden)
+library(devtools)
+library(viridis)
+library(MAST)
+library(RColorBrewer)
+library(glmGamPoi)
+library(circlize)
+
+```
+
+```{r}
+# Startup Variables
+
+# Set a Home Directory that will be the home to all the treatment folders
+homedir <- getwd()
+# Gets the name of Project
+project_name <- "Shendure_Fetal_Islets"
+# Date
+date <- "2022-03-09"
+
+
+```
+
+```{r}
+# setting theme options
+
+# Setting the theme for all of the plots that we are going to be making
+SR_theme <- theme_minimal() + theme(legend.position = "right",
+                                 legend.text = element_text(size = 12),
+                                 plot.title = element_text(size = 20,
+                                                           face = "bold",
+                                                           hjust = 0.5),
+                                 axis.line = element_line(size = 1),
+                                 line = element_blank(),
+                                 axis.ticks = element_blank(),
+                                 axis.title = element_blank())
+
+# For Qualitative colors I use scale_color_brewer
+qual.color <- scale_color_brewer(type = "qual", palette = "Accent")
+
+```
+
+```{r}
+# Featureplot Function
+SR_featurePlot <- function(dataset, feature){
+  out <- tryCatch(
+    {
+      FeaturePlot(dataset,
+                  pt.size = 1,
+                  features = feature,
+                  order = T,
+                  label = FALSE) + SR_theme + labs(title = feature) + scale_color_viridis()
+    },
+    error = function(e){
+      message(paste(feature, "resulted in an error"))
+      return(NA)
+    },
+    warning = function(j){
+      message(paste(feature, "resulted in a warning"))
+      return(NA)
+    }
+  )
+}
+
+```
+
+
+```{r}
+
+# Load Data
+sc <- readRDS("fetal_islet.seurat.RDS")
+sc
+```
+
+
+```{r}
+
+head(sc@meta.data)
+
+```
+
+
+```{r}
+# Analyze the dataset
+sc <- SCTransform(sc, method = "glmGamPoi", vars.to.regress = "percent.mito") %>% 
+  RunPCA()
+
+```
+
+
+```{r}
+
+sc <- FindNeighbors(sc,
+                    dims = 1:15,
+                    k.param = 20,
+                    annoy.metric = "cosine") %>% 
+  RunUMAP(dims = 1:15,
+          metric = "cosine", 
+          n.neighbors = 20,
+          n.epochs = 500,
+          local.connectivity = 3,
+          verbose = TRUE) %>% 
+  FindClusters(resolution = .2,
+               algorithm = 3, # Leiden algorithm
+               verbose = T)
+
+
+```
+
+
+```{r}
+
+# Generate Umap
+UMAPPlot(sc, pt.size = 1, label = T) + ggtitle("Shendure Fetal Islet")+ SR_theme
+ggsave("Shendure_leiden_umap.png", width = 5, height = 4, dpi = 300, units = "in")
+
+```
+
+```{r}
+# get markers
+sc.markers <- FindAllMarkers(sc, test.use = "wilcox")
+```
+
+
+
+
+```{r}
+
+sc.ids <- c(
+  "acinar - lipase", #0
+  "stromal",#1
+  "ductal", #2
+  "endothelial", #3
+  "lymphoid", #4
+  "acinar - prss1", #5
+  "beta", #6 
+  "myeloid", #7
+  "neural", #8
+  "delta", #9
+  "stromal", #10
+  "alpha", #11
+  "erythroblasts", #12
+  "endothelial" #13
+)
+
+
+names(sc.ids) <- levels(sc)
+sc <- RenameIdents(sc, sc.ids)
+
+sc$phenotype <- Idents(object = sc)
+
+```
+
+
+```{r}
+
+# Generate Umap
+UMAPPlot(sc, pt.size = 1) + ggtitle("Shendure Fetal Islet")+ SR_theme
+ggsave("Shendure_leiden_umap_named.png", width = 5, height = 4, dpi = 300, units = "in")
+
+```
+
+```{r}
+# Generate Umap
+
+SR_featurePlot(sc,"NKX6-1") + SR_theme
+ggsave("NKX61.png", width = 5, height = 4, dpi = 300, units = "in")
+SR_featurePlot(sc, "ISL1") + SR_theme
+ ggsave("NKX61.png", width = 5, height = 4, dpi = 300, units = "in")
+```
+
+```{r, fig.width=12, fig.height=3}
+# Find Intersection
+FeaturePlot(sc,
+            features = c("NKX6-1", "ISL1"),
+            cols = c("honeydew3", "red4", "dodgerblue"),
+            blend = T,
+            blend.threshold = 0.3,
+            pt.size = 1,
+            order = T,
+            label = FALSE) + SR_theme
+ggsave("NKX61_ISL1_blend.png", width = 12, height = 3, dpi = 300, units = "in")
+```
+
+
+
+```{r}
+# Save to use later
+saveRDS(sc, file = "shendure_islet_processed.RDS")
+```
+
+
+
+
+```{r}
+h.table <- read.table("GRCh38_ordered_v3.txt", sep = " ", header = T) # read table
+h.table <- h.table[!duplicated(h.table$gene),] # remove any duplicate genes
+rownames(h.table) <- h.table$gene # set the rownames to genes
+head(h.table) # check to make sure table looks good
+```
+
+
+
+```{r}
+assay <- "SCT"
+annotation <- "seurat_clusters"
+chr_table <- h.table
+
+
+avg_expression <- as.data.frame(AverageExpression(sc, group.by = annotation)[[assay]])
+# Add the gene expression from the average expression table in the order of the chromosome###
+chrom_expression_table <- list()
+
+for(cell_type in colnames(avg_expression)){
+  chrom_expression_table[[cell_type]] <-  data.frame(gene = chr_table$gene,chr = chr_table$chr, order = chr_table$order, expression = chr_table$expression) # move genes from chr to list
+  rownames(chrom_expression_table[[cell_type]]) <- chr_table$gene
+  
+  for(gene in rownames(avg_expression)){
+    chrom_expression_table[[cell_type]][[gene, "expression"]] <-  avg_expression[[gene, cell_type]] # this moves the expression over
+  }
+}
+
+
+### Sliding Window to better see the expression ###
+for(cell_type in names(chrom_expression_table)){
+  chrom_expression_table[[cell_type]]$expression <- rollmax(chrom_expression_table[[cell_type]]$expression,
+                                                            k = 100,
+                                                            fill = 0,
+                                                            partial = T)
+}
+
+
+### Split each cell type based on chromosome ###
+for(cell_type in names(chrom_expression_table)){
+  chrom_expression_table[[cell_type]] <- split(chrom_expression_table[[cell_type]], chrom_expression_table[[cell_type]]$chr) # split based on the chromosome
+  
+  for(c in names(chrom_expression_table[[cell_type]])){
+    chrom_expression_table[[cell_type]][[c]] <- arrange(chrom_expression_table[[cell_type]][[c]], order) # re-order just in case
+  }
+  
+}
+
+
+### Combine Based on chromosomes ###
+chr_expr_table <- list()
+
+for(c in names(chrom_expression_table[[1]])){
+  chr_expr_table[[c]] <- data.frame(row.names = rownames(chrom_expression_table[[1]][[c]])) # this creates the dataframe
+  
+  for(cell_type in names(chrom_expression_table)){
+    chr_expr_table[[c]][cell_type] <- chrom_expression_table[[cell_type]][[c]]$expression
+  }
+  
+}  
+
+
+
+# bind table
+c.table <- do.call(rbind, chr_expr_table)
+c.table$order <- 1:nrow(c.table)
+
+
+
+```
+
+
+```{r, fig.width= 20, fig.height= 8}
+ggplot(c.table, aes(x = order, y = 6 )) + geom_line() + ggtitle("6")
+```
+
+```{r, fig.width= 20, fig.height=3}
+
+# Generate Chrome Plot for the beta cells
+plt <- ChromE_single(sc, chr_table = h.table, 
+                     annotation = "seurat_clusters", ident.1 = "6",
+                     assay = "SCT", k = 250, plot.range = c(0, 30))
+
+png("Shendure_Beta_ChromE.png", height = 3, width = 15, units = "in", res = 300)
+plt
+dev.off()
+
+plt
+```
+
+
+

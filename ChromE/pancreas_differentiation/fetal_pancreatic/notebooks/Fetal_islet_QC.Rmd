@@ -1,0 +1,223 @@
+---
+title: "Fetal Pancreas Dataset QC"
+author: "Suyash Raj"
+output: html_notebook
+---
+
+```{r setup}
+
+knitr::opts_knit$set(root.dir = "~/VCGT001/fetal_pancreatic/")
+knitr::opts_chunk$set(echo=T, warning=T, message=T)
+
+
+```
+
+
+# Setup
+
+### Load Libraries
+```{r Libraries, include=FALSE}
+
+library(Seurat) #v4 beta
+library(SeuratDisk)
+library(reticulate)
+library(tidyverse)
+library(stringr)
+library(viridis)
+library(MAST)
+library(RColorBrewer)
+library(patchwork)
+library(xlsx)
+library(scales)
+library(plotly)
+library(RcppAnnoy)
+library(future)
+library(future.apply)
+
+# Set this based on available ram
+plan("multisession")
+options(future.globals.maxSize = 7000 * 1024^2)
+
+```
+
+### Variables
+Here I add variables that I can frequently use throughout the analysis
+
+```{r startupvars}
+
+date <- Sys.Date()
+
+project_name <- paste0(date, 'VCGT_S5C_analysis')
+
+# Source functions from the functions file
+source('~/VCGT001/scripts/SR_functions.R')
+
+
+```
+
+
+```{r load matrix and annotations}
+
+sc.gene <- readRDS("~/VCGT001/fetal_pancreatic/df_gene.RDS")
+sc.cell <- readRDS("~/VCGT001/fetal_pancreatic/df_cell.RDS")
+sc <- readRDS("~/VCGT001/fetal_pancreatic/Pancreas_gene_count.RDS")
+
+```
+
+```{r Create Seurat Object}
+
+rownames(sc) <- sc.gene$gene_short_name
+
+sc <- CreateSeuratObject(counts = sc,
+                         project = "fetal_islet")
+
+```
+
+
+```{r Quality Control}
+
+sc <- PercentageFeatureSet(sc, pattern = '^MT', col.name = 'percent.mito')
+sc$log10GenesPerUMI <- log10(sc$nFeature_RNA) / log10(sc$nCount_RNA)
+sc$mitoRatio <- sc$percent.mito / 100
+
+
+```
+
+
+# Plot QC Figures
+
+### Number of Cells Per Sample
+```{r NcellperSample}
+
+sc@meta.data %>% ggplot(aes(x=sc$orig.ident, fill=sc$orig.ident)) + 
+  geom_bar() + theme_classic() + ggtitle("NCells") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  theme(plot.title = element_text(hjust=0.5, face="bold")) + xlab("")
+
+ggsave("QC/NCells_perSample.png")
+```
+
+### Umi/transcripts per cell
+
+```{r UMIperCell}
+
+sc@meta.data %>% ggplot(aes(color=sc$orig.ident, x=sc$nCount_RNA, fill= sc$orig.ident)) + 
+  geom_density(alpha = 0.2) + scale_x_log10() + 
+  theme_classic() + ylab("Cell_density") + xlab("nUMI") + geom_vline(xintercept = 4500) + geom_vline(xintercept = 200000)
+
+ggsave("QC/UMIperCell.png")
+```
+
+### Genes per Cell via a histogram
+
+```{r GenesperCell}
+
+sc@meta.data %>% ggplot(aes(color=sc$orig.ident, x=sc$nFeature_RNA, fill= sc$orig.ident)) + 
+  geom_density(alpha = 0.2) + theme_classic() +
+  scale_x_log10() + geom_vline(xintercept = 2300) + xlab("nGene")
+
+ggsave("QC/nGeneperCell.png")
+```
+
+### Genes per Cell via Boxplot
+
+```{r GenesperCell2}
+
+sc@meta.data %>% ggplot(aes(x=sc$orig.ident, y=log10(sc$nFeature_RNA), fill=sc$orig.ident)) + 
+  geom_boxplot() +  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  theme(plot.title = element_text(hjust=0.5, face="bold")) +
+  ggtitle("NCells_vs_NGenes")
+
+ggsave("QC/nGeneperCell_boxplot.png")
+```
+
+
+### Distribution of Mitochondrial Gene Expression Per Cell
+We want the cells that have less than 0.2 (20%) mitochondrial DNA. Anymore and that cell probably lysed early and we just sequenced the mitochondria
+```{r MitoperCell}
+
+sc@meta.data %>% ggplot(aes(color=sc$orig.ident, x=sc$mitoRatio, fill=sc$orig.ident)) + 
+  geom_density(alpha = 0.2) + scale_x_log10() + 
+  theme_classic() + geom_vline(xintercept = 0.1)
+
+ggsave("QC/MitoperCell.png")
+```
+Our cells look super good, the line above represents 19% mitochondrial genes
+
+### Genes detected per Unique Molecular Identifyer(UMI) on a log10 scale
+
+We Want the cells that are greater than 0.8 (80%)
+```{r Log10genesperUMI}
+
+sc@meta.data %>% ggplot(aes(x=sc$log10GenesPerUMI, color = sc$orig.ident, fill=sc$orig.ident)) +
+  geom_density(alpha = 0.2) + theme_classic() +  geom_vline(xintercept = 0.8)
+
+ggsave("QC/Log10genesperUMI.png")
+```
+
+
+# Save dataset as a Seurat Object
+```{r save}
+
+saveRDS(sc, file = "fetal_islet.seurat.RDS")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

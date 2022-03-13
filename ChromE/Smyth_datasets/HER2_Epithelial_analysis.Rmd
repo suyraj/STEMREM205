@@ -1,0 +1,309 @@
+---
+title: "HER2_epithelial"
+output: html_notebook
+---
+
+```{r libraries}
+
+# Load datasets
+library(Seurat)
+library(SeuratDisk)
+library(tidyverse)
+library(ComplexHeatmap)
+library(circlize)
+library(viridis)
+library(data.table)
+library(patchwork)
+library(stringi)
+library(purrr)
+library(zoo)
+library(ComplexHeatmap)
+
+```
+
+
+```{r}
+
+HER2_Total <- readRDS("HER2_total.rds")
+
+```
+
+```{r}
+# subset epithelial compartment
+Idents(HER2_Total) <- "phenotype"
+epi <- subset(HER2_Total, idents = "Epithelial cells")
+
+```
+
+```{r}
+# setting theme options
+
+# Setting the theme for all of the plots that we are going to be making
+SR_theme <- theme_minimal() + theme(legend.position = "right",
+                                 legend.text = element_text(size = 12),
+                                 plot.title = element_text(size = 20,
+                                                           face = "bold",
+                                                           hjust = 0.5),
+                                 axis.line = element_line(size = 1),
+                                 line = element_blank(),
+                                 axis.ticks = element_blank(),
+                                 axis.title = element_blank())
+
+# For Qualitative colors I use scale_color_brewer
+qual.color <- scale_color_brewer(type = "qual", palette = "Accent")
+
+```
+
+```{r}
+# Featureplot Function
+SR_featurePlot <- function(dataset, feature){
+  out <- tryCatch(
+    {
+      FeaturePlot(dataset,
+                  pt.size = 1,
+                  features = feature,
+                  order = T,
+                  label = FALSE) + SR_theme + labs(title = feature) + scale_color_viridis()
+    },
+    error = function(e){
+      message(paste(feature, "resulted in an error"))
+      return(NA)
+    },
+    warning = function(j){
+      message(paste(feature, "resulted in a warning"))
+      return(NA)
+    }
+  )
+}
+
+```
+
+```{r}
+head(epi@meta.data)
+```
+
+
+```{r}
+# Analyze the dataset
+epi <- SCTransform(epi, method = "glmGamPoi") %>% RunPCA()
+
+```
+
+```{r}
+
+epi <- FindNeighbors(epi,
+                    dims = 1:15,
+                    k.param = 20,
+                    annoy.metric = "cosine") %>% 
+  RunUMAP(dims = 1:15,
+          metric = "cosine", 
+          n.neighbors = 20,
+          n.epochs = 500,
+          local.connectivity = 3,
+          verbose = TRUE) %>% 
+  FindClusters(resolution = .2,
+               algorithm = 3, # SLM algorithm
+               verbose = T)
+
+
+```
+
+```{r}
+
+# Generate Umap
+UMAPPlot(epi, pt.size = 1, label = T) + ggtitle("HER2 Epithelial")+ SR_theme
+ggsave("HER2_Epithelial_umap.png", width = 5, height = 4, dpi = 300, units = "in")
+
+```
+
+```{r}
+# get markers
+epi.markers <- FindAllMarkers(epi, test.use = "wilcox")
+```
+
+
+
+```{r}
+
+epi.ids <- c(
+  "Cancer_1", #0
+  "Cancer_2",#1
+  "Cancer_3", #2
+  "Cancer_5", #3
+  "Cancer_4", #4
+  "Cancer_6", #5
+  "Cancer_1", #6 
+  "Cancer_3", #7
+  "Cancer_5", #8
+  "Cancer_1", #9
+  "Cancer_1", #10
+  "Cancer_6" #11
+)
+
+
+names(epi.ids) <- levels(epi)
+epi <- RenameIdents(epi, epi.ids)
+
+epi$phenotype <- Idents(object = epi)
+
+```
+
+
+```{r}
+
+# Generate Umap
+UMAPPlot(epi, pt.size = 1) + ggtitle("HER2 Epithelial")+ SR_theme
+ggsave("HER2_Epithelial_labeled_umap.png", width = 5, height = 4, dpi = 300, units = "in")
+
+
+```
+
+
+```{r}
+
+annotation <- "phenotype"
+assay <- "SCT"
+chr_table <- h.table
+
+avg_expression <- as.data.frame(AverageExpression(epi, group.by = annotation)[[assay]])
+# Add the gene expression from the average expression table in the order of the chromosome###
+chrom_expression_table <- list()
+
+for(cell_type in colnames(avg_expression)){
+  chrom_expression_table[[cell_type]] <-  data.frame(gene = chr_table$gene,chr = chr_table$chr, order = chr_table$order, expression = chr_table$expression) # move genes from chr to list
+  rownames(chrom_expression_table[[cell_type]]) <- chr_table$gene
+  
+  for(gene in rownames(avg_expression)){
+    chrom_expression_table[[cell_type]][[gene, "expression"]] <-  avg_expression[[gene, cell_type]] # this moves the expression over
+  }
+}
+
+
+### Sliding Window to better see the expression ###
+for(cell_type in names(chrom_expression_table)){
+  chrom_expression_table[[cell_type]]$expression <- rollmax(chrom_expression_table[[cell_type]]$expression,
+                                                            k = 100,
+                                                            fill = 0,
+                                                            partial = T)
+}
+
+
+### Split each cell type based on chromosome ###
+for(cell_type in names(chrom_expression_table)){
+  chrom_expression_table[[cell_type]] <- split(chrom_expression_table[[cell_type]], chrom_expression_table[[cell_type]]$chr) # split based on the chromosome
+  
+  for(c in names(chrom_expression_table[[cell_type]])){
+    chrom_expression_table[[cell_type]][[c]] <- arrange(chrom_expression_table[[cell_type]][[c]], order) # re-order just in case
+  }
+  
+}
+
+
+### Combine Based on chromosomes ###
+chr_expr_table <- list()
+
+for(c in names(chrom_expression_table[[1]])){
+  chr_expr_table[[c]] <- data.frame(row.names = rownames(chrom_expression_table[[1]][[c]])) # this creates the dataframe
+  
+  for(cell_type in names(chrom_expression_table)){
+    chr_expr_table[[c]][cell_type] <- chrom_expression_table[[cell_type]][[c]]$expression
+  }
+  
+}  
+
+
+
+# bind table
+c.table <- do.call(rbind, chr_expr_table)
+c.table$order <- 1:nrow(c.table)
+
+
+```
+
+
+```{r, fig.width= 20, fig.height= 8}
+ggplot(c.table, aes(x = order, y = Cancer_5 )) + geom_line() + ggtitle("Cancer_5") + ylim(0,20)
+```
+
+```{r, fig.width= 15,fig.height=5}
+
+plt <- ChromE(epi, chr_table = h.table, annotation = "phenotype", assay = "SCT", k = 200,plot.range = c(0,10))
+
+png("Smyth_Epi_ChromE.png", height = 5, width = 15, units = "in", res = 300)
+plt
+dev.off()
+
+plt
+
+```
+
+# Boxplot
+```{r}
+# split based on the categories
+epi.split <- SplitObject(epi, split.by = "phenotype")
+
+# Sum
+sum.list <- list()
+for(i in names(epi.split)){
+  for(cell in colnames(epi.split[[i]]@assays$RNA)){
+    sum.list[[i]] <- c(sum.list[[i]], sum(epi.split[[i]]@assays$RNA[,cell] > 0))
+  }
+}
+
+# join the lists together
+epi.table <- as.data.frame( do.call(cbind,sum.list) )
+
+epi.stack <- stack(epi.table)
+
+
+
+
+```
+
+
+```{r}
+
+ggplot(epi.stack, aes(x = ind, y = values, fill = ind)) +
+    geom_boxplot() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) + ylab("Gene count") + ggtitle("HER2 Epithelial Tumor Genes per Cell")
+  
+ggsave("HER2 Epithelial Tumor Genes per Cell.png")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

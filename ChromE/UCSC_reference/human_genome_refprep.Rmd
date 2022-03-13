@@ -1,0 +1,170 @@
+---
+title: "Preping Reference Human Genome Plot"
+output: html_notebook
+---
+
+
+
+```{r}
+# load packages
+library(tidyverse)
+library(dplyr)
+library(stringr)
+
+```
+
+
+```{r}
+
+ref_table <- read.table("GRCh38_knownGene.bed", header = F, sep = "\t", stringsAsFactors = T)
+
+head(ref_table)
+```
+
+
+```{r}
+
+# Rename the columns
+colnames(ref_table) <- c("chr","start", "end", "gene", "type", "class", "source", "level", "inc")
+
+```
+
+
+```{r}
+#  Change the M, X, and Y to 23,24,25
+ref_table$chr <- sub("chrX", "chr23", ref_table$chr)
+ref_table$chr <- sub("chrY", "chr24", ref_table$chr)
+ref_table$chr <- sub("chrM", "chr25", ref_table$chr)
+
+```
+
+
+```{r}
+
+# split based on chromosome
+ref_table.split <-  split(ref_table, ref_table$chr)
+
+
+```
+
+
+```{r}
+# remove the alternate chromosomes
+ref_table.split <- ref_table.split[str_detect(names(ref_table.split),pattern = "_", negate = T)]
+
+names(ref_table.split)
+
+```
+
+
+```{r}
+# sort all the tables based on the chromStart
+ref_table.split <- lapply(ref_table.split, arrange, start)
+
+
+```
+
+
+```{r}
+
+# adding a new column with order
+for(i in seq_along(ref_table.split)){
+  ref_table.split[[i]]$order <- 1:nrow(ref_table.split[[i]]) # adds the order column
+  ref_table.split[[i]]$expression <- rep(0, nrow(ref_table.split[[i]]))
+}
+
+```
+
+
+
+```{r}
+
+# combine tables again by row
+ref_table <- bind_rows(ref_table.split)
+
+head(ref_table)
+```
+
+
+```{r}
+
+ref_table$chr <- str_replace(ref_table$chr, "chr", "")
+
+```
+
+
+```{r}
+#arrange so that the chromosomes are in the correct order
+ref_table$chr <- factor(ref_table$chr, levels = order(levels(as.factor(ref_table$chr))))
+head(ref_table)
+```
+
+```{r}
+# get rid of duplicates!
+ref_table[!duplicated(ref_table$gene),]
+
+```
+
+
+
+
+```{r}
+
+# save
+write_delim(ref_table, file = "GRCh38_ordered_v3.txt")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

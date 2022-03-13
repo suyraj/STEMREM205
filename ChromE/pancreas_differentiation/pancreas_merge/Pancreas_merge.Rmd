@@ -1,0 +1,254 @@
+---
+title: "Pancreas_merge"
+output: html_notebook
+---
+
+
+```{r}
+library(Seurat) #v3.1.1
+library(sctransform)
+library(reticulate)
+library(rmarkdown)
+library(stringr)
+library(tidyverse)
+library(devtools)
+library(viridis)
+library(MAST)
+library(RColorBrewer)
+library(glmGamPoi)
+library(circlize)
+```
+
+
+
+
+```{r}
+# setting theme options
+
+# Setting the theme for all of the plots that we are going to be making
+SR_theme <- theme_minimal() + theme(legend.position = "right",
+                                 legend.text = element_text(size = 12),
+                                 plot.title = element_text(size = 20,
+                                                           face = "bold",
+                                                           hjust = 0.5),
+                                 axis.line = element_line(size = 1),
+                                 line = element_blank(),
+                                 axis.ticks = element_blank(),
+                                 axis.title = element_blank())
+
+# For Qualitative colors I use scale_color_brewer
+qual.color <- scale_color_brewer(type = "qual", palette = "Accent")
+
+```
+
+
+```{r}
+# Featureplot Function
+SR_featurePlot <- function(dataset, feature){
+  out <- tryCatch(
+    {
+      FeaturePlot(dataset,
+                  pt.size = 2,
+                  features = feature,
+                  order = T,
+                  label = FALSE) + SR_theme + labs(title = feature) + scale_color_viridis()
+    },
+    error = function(e){
+      message(paste(feature, "resulted in an error"))
+      return(NA)
+    },
+    warning = function(j){
+      message(paste(feature, "resulted in a warning"))
+      return(NA)
+    }
+  )
+}
+
+```
+
+
+```{r}
+# load dataset
+veres <- readRDS("C:/Users/suyma/OneDrive - Stanford/SR205_project/pancreas_differentiation/pancreas_merge/veres_islet_processed.RDS")
+
+fetal <- readRDS("C:/Users/suyma/OneDrive - Stanford/SR205_project/pancreas_differentiation/pancreas_merge/shendure_islet_processed.RDS")
+
+```
+
+
+```{r}
+
+# Generate Consistent Colors
+
+# First Get all of the names of the idents that we saved in sc.ids
+sc.ids <- unique(c(levels(as.factor(veres$assigned_cluster)),
+                   levels(as.factor(fetal$phenotype))))
+
+# Now we can use R color Brewer to make any number of colors
+# In this case we set it to the length of the number of unique identities we had
+col_vector <- colorRampPalette(brewer.pal(8, "Set1"), bias = 1, interpolate = 'spline',space = 'Lab')(length(sc.ids))
+# Set the name of the color the the ID
+names(col_vector) <- sc.ids
+
+
+#Print a pie so you can see if you like the colors you picked
+pie(rep(1,length(sc.ids)), col=sample(col_vector, length(sc.ids)))
+
+```
+
+```{r}
+
+# Generate Umap
+UMAPPlot(fetal, pt.size = 1, cols = col_vector) + ggtitle("Shendure Fetal Islet")+ SR_theme
+ggsave("Shendure_leiden_umap.png", width = 5, height = 5, dpi = 300, units = "in")
+
+```
+
+```{r}
+Idents(veres) <- "assigned_cluster"
+veres.beta <- subset(veres, idents = "beta")
+veres.beta$source <- "sc_Islet"
+
+Idents(fetal) <- "phenotype"
+fetal.beta <- subset(fetal, idents = "beta")
+fetal.beta$source <- "fetal_Islet"
+
+```
+
+```{r}
+sc <- merge(x = veres.beta, y = fetal.beta)
+```
+
+```{r}
+# Regress out and use residuals between both samples
+sc <- ScaleData(sc, vars.to.regress = "source")
+
+```
+
+
+```{r}
+
+UMAPPlot(veres,group.by = "assigned_cluster", pt.size = 1, cols = col_vector) + ggtitle("Veres Stage 5 Cells")+ SR_theme
+ggsave("Veres_assigned_umap.png", width = 5, height = 5, dpi = 300, units = "in")
+
+```
+
+```{r}
+
+VlnPlot(sc, features = c("INS"), pt.size = 0, log = T, group.by = "source")
+ggsave("beta_ins_vln.png")
+
+```
+
+
+
+```{r}
+sc <- NormalizeData(sc) %>% ScaleData(features = rownames(sc))
+
+
+```
+
+
+
+
+```{r}
+
+annotation <- "source"
+assay <- "SCT"
+chr_table <- h.table
+
+avg_expression <- as.data.frame(AverageExpression(sc, group.by = annotation)[[assay]])
+# Add the gene expression from the average expression table in the order of the chromosome###
+chrom_expression_table <- list()
+
+for(cell_type in colnames(avg_expression)){
+  chrom_expression_table[[cell_type]] <-  data.frame(gene = chr_table$gene,chr = chr_table$chr, order = chr_table$order, expression = chr_table$expression) # move genes from chr to list
+  rownames(chrom_expression_table[[cell_type]]) <- chr_table$gene
+  
+  for(gene in rownames(avg_expression)){
+    chrom_expression_table[[cell_type]][[gene, "expression"]] <-  avg_expression[[gene, cell_type]] # this moves the expression over
+  }
+}
+
+
+### Sliding Window to better see the expression ###
+for(cell_type in names(chrom_expression_table)){
+  chrom_expression_table[[cell_type]]$expression <- rollmax(chrom_expression_table[[cell_type]]$expression,
+                                                            k = 100,
+                                                            fill = 0,
+                                                            partial = T)
+}
+
+
+### Split each cell type based on chromosome ###
+for(cell_type in names(chrom_expression_table)){
+  chrom_expression_table[[cell_type]] <- split(chrom_expression_table[[cell_type]], chrom_expression_table[[cell_type]]$chr) # split based on the chromosome
+  
+  for(c in names(chrom_expression_table[[cell_type]])){
+    chrom_expression_table[[cell_type]][[c]] <- arrange(chrom_expression_table[[cell_type]][[c]], order) # re-order just in case
+  }
+  
+}
+
+
+### Combine Based on chromosomes ###
+chr_expr_table <- list()
+
+for(c in names(chrom_expression_table[[1]])){
+  chr_expr_table[[c]] <- data.frame(row.names = rownames(chrom_expression_table[[1]][[c]])) # this creates the dataframe
+  
+  for(cell_type in names(chrom_expression_table)){
+    chr_expr_table[[c]][cell_type] <- chrom_expression_table[[cell_type]][[c]]$expression
+  }
+  
+}  
+
+
+
+# bind table
+c.table <- do.call(rbind, chr_expr_table)
+c.table$order <- 1:nrow(c.table)
+
+
+```
+
+
+```{r, fig.width= 20, fig.height= 8}
+ggplot(c.table, aes(x = order)) + 
+  geom_line(aes(y = fetal_Islet), color = "red") +
+  geom_line(aes(y = sc_Islet), color = "blue") +
+  ggtitle("comp") + ylim(0,10)
+```
+
+```{r, fig.width= 15, fig.height=3}
+
+plt <- ChromE(sc, chr_table = h.table, annotation = "source", assay = "SCT", k = 200, plot.range = c(0,10))
+
+plt
+
+png("merge_Beta_ChromE.png", height = 3, width = 15, units = "in", res = 300)
+plt
+dev.off()
+
+
+plt
+```
+
+
+```{r, fig.width= 15, fig.height=3}
+
+plt <- ChromE_single(fetal, chr_table = h.table, annotation = "phenotype", ident.1 = "beta", assay = "SCT", k = 200, plot.range = c(0,5))
+
+png("Fetal_Beta_ChromE.png", height = 3, width = 15, units = "in", res = 300)
+plt
+dev.off()
+
+
+plt
+```
+
+
+
+
+
+

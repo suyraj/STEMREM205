@@ -1,0 +1,65 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r}
+BFibro <- readRDS("/labs/longaker/USR/KE_Bauer-Rowe/kemgfolder/RDS Files/Bowel_SubClusters.rds")
+
+```
+```{r}
+BFibro@meta.data
+BFibro@meta.data$new.cluster.ids.bowel
+```
+
+```{r}
+ave.expression <- AverageExpression(BFibro, group.by = "new.cluster.ids.bowel")
+ave.expression
+```
+
+```{r}
+mouse_chrom<- read.delim("/labs/longaker/USR/KE_Bauer-Rowe/kemgfolder/205 Project/mm10_ordered.txt", sep = " ")
+```
+
+```{r}
+mouse_chrom = mouse_chrom[!duplicated(mouse_chrom$gene_symbol),]
+rownames(mouse_chrom) = mouse_chrom$gene_symbol
+```
+```{r}
+ave.expression = ave.expression$RNA
+ave.expression = as.data.frame(ave.expression)
+```
+
+```{r}
+celltype.table = list()
+for (i in colnames(ave.expression)){
+  celltype.table[[i]] = mouse_chrom$expression
+  names(celltype.table[[i]]) = rownames(mouse_chrom)
+  
+  
+
+  for (gene in rownames(ave.expression)) {
+    celltype.table[[i]][[gene]] = ave.expression[[gene, i]]
+    
+    
+  }
+}
+```
+
+```{r}
+mat = as.data.frame(do.call(cbind, celltype.table))
+```
+
+
+```{r}
+mat = t(mat)
+
+```
+
+```{r}
+col_fun <- colorRamp2(seq(-1,2, length.out = 50), viridis(50))
+Heatmap(mat, col = col_fun, cluster_columns = F, cluster_rows = F, show_column_names = FALSE)
+```
+
