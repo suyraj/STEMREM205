@@ -1,0 +1,143 @@
+---
+
+title: "mouse neuron ChromE"
+output: html_notebook
+
+---
+
+
+```{r}
+library(Seurat)
+library(devtools)
+library(dplyr)
+library(patchwork)
+library(Cairo)
+library(zoo)
+library(patchwork)
+library(ggplot2)
+library(reticulate)
+library(tidyverse)
+library(readxl)
+library(stringr)
+library(viridis)
+library(RColorBrewer)
+library(patchwork)
+library(scales)
+library(plotly)
+library(RcppAnnoy)
+library(circlize)
+library(ComplexHeatmap)
+```
+
+
+
+```{r}
+m.table <- read.table("/Users/jenniferparker/Documents/SCBRMY1/WinterQuarter/SR205/FinalProject/mm10_ordered_v3.txt", sep = " ", header = T) # read table
+m.table <- m.table[!duplicated(m.table$gene),] # remove any duplicate genes
+rownames(m.table) <- m.table$gene # set the rownames to genes
+```
+
+
+
+
+```{r}
+mouse_neuron <- readRDS("/Users/jenniferparker/Documents/SCBRMY1/WinterQuarter/SR205/FinalProject/Mouse_Data_DirectProtocol_Neuron.RDS")
+
+mouse_neuron@meta.data
+
+mouse_neuron <- NormalizeData(mouse_neuron, normalization.method = "LogNormalize", scale.factor = 10000)
+
+mouse_neuron <- FindVariableFeatures(mouse_neuron, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(mouse_neuron), 10)
+```
+```{r}
+all.genes <- rownames(mouse_neuron)
+mouse_neuron <- ScaleData(mouse_neuron, features = all.genes)
+```
+```{r}
+mouse_neuron <- RunPCA(mouse_neuron, features = VariableFeatures(object = mouse_neuron))
+```
+
+```{r}
+# Examine and visualize PCA results a few different ways
+print(mouse_neuron[["pca"]], dims = 1:5, nfeatures = 5)
+```
+
+```{r}
+# NOTE: This process can take a long time for big datasets, comment out for expediency. More
+# approximate techniques such as those implemented in ElbowPlot() can be used to reduce
+# computation time
+mouse_neuron <- JackStraw(mouse_neuron, num.replicate = 100)
+
+
+```
+
+```{r}
+ElbowPlot(mouse_neuron)
+```
+```{r}
+mouse_neuron <- FindNeighbors(mouse_neuron, dims = 1:10)
+mouse_neuron <- FindClusters(mouse_neuron, resolution = 0.5)
+```
+```{r}
+head(Idents(mouse_neuron), 5)
+
+```
+
+```{r}
+# If you haven't installed UMAP, you can do so via reticulate::py_install(packages =
+# 'umap-learn')
+#reticulate::py_install(packages ='umap-learn')
+mouse_neuron <- RunUMAP(mouse_neuron, dims = 1:10)
+```
+```{r}
+
+DimPlot(mouse_neuron, reduction = "umap", group.by = "phenotype")
+
+#saveRDS(pbmc, file = "../output/pbmc_tutorial.rds")
+
+```
+
+
+
+```{r}
+names(new.cluster.ids) <- levels(mouse_neuron)
+mouse_neuron$new_cluster_ids <- Idents(object = mouse_neuron)
+head(mouse_neuron@meta.data)
+DimPlot(mouse_neuron, group.by = "phenotype", reduction = "umap", label = TRUE, pt.size = 0.5) + NoLegend()
+```
+
+
+``'
+```{r}
+#Load function
+source("/Users/jenniferparker/Documents/SCBRMY1/WinterQuarter/SR205/FinalProject/ChromE_function.R")
+```
+
+
+```{r, fig.width = 12, fig.height = 4}
+levels(as.factor(mouse_neuron$phenotype))
+order <- c("ESC", "NP", "EMN", "LMN")
+
+map <- ChromE(mouse_neuron, m.table, 'phenotype', order = order, assay = "RNA", k = 250, plot.range=c(0,60))
+
+```
+```{r}
+source("/Users/jenniferparker/Documents/SCBRMY1/WinterQuarter/SR205/FinalProject/boxplot_stemcell.R")
+```
+
+
+
+```{r}
+#to tweak the data so it can work with the boxplot function
+head(mouse_neuron@meta.data)
+
+mouse_neuron_split <- SplitObject(mouse_neuron, split.by = "phenotype")
+
+boxplot <- reg_count_boxplot(mouse_neuron_split, order = NULL, split.by = "phenotype", reg.cutoff = 0, frac = F)
+
+boxplot
+```
+
